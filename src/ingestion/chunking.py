@@ -6,11 +6,8 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-try:
-    from langchain.text_splitter import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
-except Exception:  # pragma: no cover - optional dependency
-    MarkdownHeaderTextSplitter = None
-    RecursiveCharacterTextSplitter = None
+from langchain.text_splitter import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+
 
 
 @dataclass
