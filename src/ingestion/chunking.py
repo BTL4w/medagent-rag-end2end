@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from langchain.text_splitter import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 
 
 
