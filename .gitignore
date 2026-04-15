@@ -1,3 +1,6 @@
 data/
 .med_venv/
-.env
+
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
