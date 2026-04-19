@@ -7,7 +7,7 @@ from src.graph.state import GraphState
 
 
 def _route_after_orchestrator(state: GraphState) -> str:
-    if state.get("route") == "simple_qa":
+    if state.get("route") in ("simple_qa", "complex_qa"):
         return "retriever_node"
     return "finalize_node"
 
@@ -17,8 +17,9 @@ def build_graph():
     Build workflow:
     query -> router_node -> orchestrator_entry_node -> retriever_node -> synthesizer_node -> finalize_node
 
-    For now only `simple_qa` continues to retrieval+synthesis.
-    Other routes are returned as not-yet-implemented placeholders.
+    - `simple_qa`: single hybrid retrieve -> synthesize.
+    - `complex_qa`: planner decomposes into sub-queries -> retrieve each -> merge -> synthesize.
+    Other routes short-circuit to a direct answer in orchestrator_entry_node.
     """
     nodes = build_nodes()
 

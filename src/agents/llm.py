@@ -30,7 +30,7 @@ class OptionalLLM:
     ) -> None:
         load_dotenv()
         self.api_key = os.getenv("OPENAI_API_KEY", "").strip()
-        self.model_name = model_name or os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+        self.model_name = model_name or os.getenv("OPENAI_MODEL", "gpt-5-mini").strip()
         env_base_url = os.getenv("OPENAI_BASE_URL", "").strip()
         effective_base_url = base_url or env_base_url
         self.base_url = effective_base_url.rstrip("/") if effective_base_url else None

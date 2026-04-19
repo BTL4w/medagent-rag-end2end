@@ -18,7 +18,9 @@ def run_agent(
 
     Flow:
     - route query
-    - if route is `simple_qa`: retrieve contexts -> synthesize answer
+    - if route is `simple_qa`: hybrid retrieve -> synthesize answer
+    - if route is `complex_qa`: planner splits into sub-queries -> retrieve each ->
+      merge contexts -> synthesize answer
     - finalize and return response for user
     """
     graph = build_graph()

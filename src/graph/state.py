@@ -12,7 +12,8 @@ class GraphState(TypedDict, total=False):
     top_k: int
     messages: List[messages.BaseMessage]
     retrieval_filter: Dict[str, Any] | None
-    plan: Dict[str, Any] | None
+    # Sub-queries produced by planner for complex_qa (each used for hybrid_retrieve).
+    sub_queries: List[str]
     contexts: List[Dict[str, Any]]
     citations: List[Dict[str, Any]]
     answer: str

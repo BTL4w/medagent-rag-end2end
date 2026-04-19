@@ -1,10 +1,27 @@
 from __future__ import annotations
 
-from src.agents.planner import build_plan
+from typing import Any, Dict, List
+
+from src.agents.planner import decompose_to_subqueries
 from src.agents.router import route_query
 from src.agents.synthesizer import synthesize_answer
 from src.graph.state import GraphState
 from src.retrieval.hybrid_search import hybrid_retrieve
+
+
+def _dedupe_contexts(items: List[Dict[str, Any]], max_items: int) -> List[Dict[str, Any]]:
+    seen: set[Any] = set()
+    out: List[Dict[str, Any]] = []
+    for item in items:
+        text = (item.get("text") or "")[:400]
+        key = item.get("id") if item.get("id") is not None else hash(text)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+        if len(out) >= max_items:
+            break
+    return out
 
 
 def router_node(state: GraphState) -> GraphState:
@@ -21,6 +38,13 @@ def orchestrator_entry_node(state: GraphState) -> GraphState:
     query = (state.get("query") or "").strip()
     top_k = int(state.get("top_k", 5))
 
+    if route == "complex_qa":
+        sub_queries = decompose_to_subqueries(query)
+        return {
+            "top_k": top_k,
+            "sub_queries": sub_queries,
+        }
+
     if route != "simple_qa":
         if route == "clarify":
             msg = "Truy vấn của bạn có vẻ chưa đủ rõ để xác định mục tiêu. Bạn có thể cung cấp thêm chi tiết (triệu chứng, thời gian, độ tuổi, bệnh nền, và/hoặc câu hỏi cụ thể) không?"
@@ -28,33 +52,46 @@ def orchestrator_entry_node(state: GraphState) -> GraphState:
             msg = "Mình đã hiểu. Hiện tại hệ thống end-to-end này tập trung vào luồng `simple_qa` (hỏi đáp kiến thức y khoa)."
         elif route == "appointment":
             msg = "Chưa triển khai chức năng đặt lịch trong workflow v1 này. Bạn có thể cho mình nội dung câu hỏi y khoa cụ thể để mình hỗ trợ."
-        elif route == "complex_qa":
-            msg = "Luồng `complex_qa` chưa được triển khai trong workflow v1. Hiện tại bạn có thể thử lại với câu hỏi đơn giản hơn."
         else:
             msg = "Truy vấn nằm ngoài phạm vi hỗ trợ hiện tại. Nếu bạn có câu hỏi y khoa cụ thể, hãy gửi lại rõ hơn."
-        return {
-            "plan": build_plan(route=route, query=query),
-            "answer": msg,
-        }
+        return {"answer": msg}
 
-    return {
-        "top_k": top_k,
-        "plan": build_plan(route=route, query=query),
-    }
+    return {"top_k": top_k}
 
 
 def retriever_node(state: GraphState) -> GraphState:
     query = (state.get("query") or "").strip()
+    route = state.get("route", "unsupported")
     top_k = int(state.get("top_k", 5))
     retrieval_filter = state.get("retrieval_filter")
     if not query:
         return {"contexts": [], "answer": "Empty query."}
 
-    contexts = hybrid_retrieve(
-        query=query,
-        top_k=top_k,
-        filter=retrieval_filter,
-    )
+    if route == "complex_qa":
+        subs = state.get("sub_queries") or [query]
+        merged: List[Dict[str, Any]] = []
+        per_sub_k = max(1, top_k)
+        max_merged = min(40, max(top_k * max(2, len(subs)), top_k))
+        for sq in subs:
+            sq = (sq or "").strip()
+            if not sq:
+                continue
+            part = hybrid_retrieve(
+                query=sq,
+                top_k=per_sub_k,
+                filter=retrieval_filter,
+            )
+            merged.extend(part)
+        contexts = _dedupe_contexts(merged, max_items=max_merged)
+    else:
+        contexts = hybrid_retrieve(
+            query=query,
+            top_k=top_k,
+            filter=retrieval_filter,
+        )
+
+    cite_limit = top_k if route != "complex_qa" else min(len(contexts), max(top_k * 3, 15))
+    cite_limit = max(1, cite_limit)
     citations = [
         {
             "id": item.get("id"),
@@ -62,7 +99,7 @@ def retriever_node(state: GraphState) -> GraphState:
             "section": item.get("section"),
             "subsection": item.get("subsection"),
         }
-        for item in contexts[:top_k]
+        for item in contexts[:cite_limit]
     ]
     return {"contexts": contexts, "citations": citations}
 
@@ -80,7 +117,7 @@ def finalize_node(state: GraphState) -> GraphState:
             "query": state.get("query"),
             "route": state.get("route"),
             "route_reason": state.get("route_reason"),
-            "plan": state.get("plan"),
+            "sub_queries": state.get("sub_queries", []),
             "answer": state.get("answer"),
             "citations": state.get("citations", []),
             "contexts": state.get("contexts", []),
