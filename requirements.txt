@@ -13,3 +13,6 @@ torch
 sentence-transformers
 python-dotenv
 pinecone
+google-api-python-client
+google-auth
+tzdata

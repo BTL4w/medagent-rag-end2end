@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 from src.agents.planner import decompose_to_subqueries
 from src.agents.router import route_query
 from src.agents.synthesizer import synthesize_answer
+from src.agents.tools import handle_appointment_request
 from src.graph.state import GraphState
 from src.retrieval.hybrid_search import hybrid_retrieve
 
@@ -53,7 +54,11 @@ def orchestrator_entry_node(state: GraphState) -> GraphState:
         if route == "clarify":
             msg = "Câu hỏi của bạn có vẻ chưa đủ rõ để xác định mục tiêu. Bạn có thể cung cấp thêm chi tiết (triệu chứng, thời gian, độ tuổi, bệnh nền, và/hoặc câu hỏi cụ thể) không?"
         elif route == "appointment":
-            msg = "Chưa triển khai chức năng đặt lịch trong workflow v1 này. Bạn có thể cho mình nội dung câu hỏi y khoa cụ thể để mình hỗ trợ."
+            booking_result = handle_appointment_request(query=query)
+            return {
+                "answer": booking_result.get("message", "Đã xử lý yêu cầu đặt lịch."),
+                "appointment_result": booking_result,
+            }
         else:
             msg = "Truy vấn nằm ngoài phạm vi hỗ trợ hiện tại. Nếu bạn có câu hỏi y khoa cụ thể, hãy gửi lại rõ hơn."
         return {"answer": msg}
@@ -123,6 +128,7 @@ def finalize_node(state: GraphState) -> GraphState:
             "answer": state.get("answer"),
             "citations": state.get("citations", []),
             "contexts": state.get("contexts", []),
+            "appointment_result": state.get("appointment_result"),
             "error": state.get("error"),
         }
     }

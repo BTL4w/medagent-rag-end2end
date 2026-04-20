@@ -17,5 +17,6 @@ class GraphState(TypedDict, total=False):
     contexts: List[Dict[str, Any]]
     citations: List[Dict[str, Any]]
     answer: str
+    appointment_result: Dict[str, Any]
     final_response: Dict[str, Any]
     error: str

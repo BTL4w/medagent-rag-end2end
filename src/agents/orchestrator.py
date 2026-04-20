@@ -22,6 +22,7 @@ def run_agent(
     - if route is `complex_qa`: planner splits into sub-queries -> retrieve each ->
       merge contexts -> synthesize answer
     - if route is `chitchat`: skip retrieval and synthesize direct response
+    - if route is `appointment`: call appointment tool workflow (check/create/delete)
     - finalize and return response for user
     """
     graph = build_graph()
