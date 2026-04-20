@@ -7,8 +7,11 @@ from src.graph.state import GraphState
 
 
 def _route_after_orchestrator(state: GraphState) -> str:
-    if state.get("route") in ("simple_qa", "complex_qa"):
+    route = state.get("route")
+    if route in ("simple_qa", "complex_qa"):
         return "retriever_node"
+    if route == "chitchat":
+        return "synthesizer_node"
     return "finalize_node"
 
 
@@ -16,9 +19,11 @@ def build_graph():
     """
     Build workflow:
     query -> router_node -> orchestrator_entry_node -> retriever_node -> synthesizer_node -> finalize_node
+                                                    -> synthesizer_node (for chitchat) -> finalize_node
 
     - `simple_qa`: single hybrid retrieve -> synthesize.
     - `complex_qa`: planner decomposes into sub-queries -> retrieve each -> merge -> synthesize.
+    - `chitchat`: skip retrieval and let synthesizer answer directly.
     Other routes short-circuit to a direct answer in orchestrator_entry_node.
     """
     nodes = build_nodes()
@@ -37,6 +42,7 @@ def build_graph():
         _route_after_orchestrator,
         {
             "retriever_node": "retriever_node",
+            "synthesizer_node": "synthesizer_node",
             "finalize_node": "finalize_node",
         },
     )

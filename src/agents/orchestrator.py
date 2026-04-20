@@ -21,6 +21,7 @@ def run_agent(
     - if route is `simple_qa`: hybrid retrieve -> synthesize answer
     - if route is `complex_qa`: planner splits into sub-queries -> retrieve each ->
       merge contexts -> synthesize answer
+    - if route is `chitchat`: skip retrieval and synthesize direct response
     - finalize and return response for user
     """
     graph = build_graph()

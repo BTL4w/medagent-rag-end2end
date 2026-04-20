@@ -1,8 +1,32 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from src.agents.llm import OptionalLLM
+
+
+def _build_chitchat_response_with_llm(query: str, llm: OptionalLLM) -> Optional[str]:
+    if not llm.enabled:
+        return None
+
+    system_prompt = (
+        "Bạn là trợ lý y khoa. "
+        "Nhiệm vụ: xử lý hội thoại xã giao và luôn điều hướng về domain chính gồm bệnh lý, thuốc, thông tin sức khỏe.\n"
+        "Chỉ xét các nhóm: greeting, identify(bạn là ai), capability(những khả năng của bạn), thanks(lời cảm ơn của user), farewell(lời tạm biệt).\n"
+        "Nếu query thuộc một trong 5 nhóm trên: trả lời ngắn gọn 1-2 câu, thân thiện, và kết bằng gợi ý hỏi về bệnh lý/thuốc/sức khỏe.\n"
+        "Nếu query không thuộc 5 nhóm trên: chỉ trả về đúng chuỗi __NOT_CHITCHAT__."
+    )
+    user_prompt = f"Query: {query}"
+
+    try:
+        response = llm.chat(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.0)
+    except Exception:
+        return None
+
+    cleaned = (response or "").strip()
+    if not cleaned or cleaned == "__NOT_CHITCHAT__":
+        return None
+    return cleaned
 
 
 def _format_citation(item: Dict) -> str:
@@ -62,6 +86,11 @@ def synthesize_answer(query: str, contexts: List[Dict]) -> str:
     Uses optional LLM when configured, otherwise falls back to deterministic synthesis.
     """
     llm = OptionalLLM()
+    if not contexts:
+        chitchat_response = _build_chitchat_response_with_llm(query=query, llm=llm)
+        if chitchat_response:
+            return chitchat_response
+
     if llm.enabled and contexts:
         system_prompt = (
             "Bạn là trợ lý y khoa sử dụng RAG. "
