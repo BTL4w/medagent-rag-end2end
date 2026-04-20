@@ -51,7 +51,7 @@ def orchestrator_entry_node(state: GraphState) -> GraphState:
 
     if route != "simple_qa":
         if route == "clarify":
-            msg = "Truy vấn của bạn có vẻ chưa đủ rõ để xác định mục tiêu. Bạn có thể cung cấp thêm chi tiết (triệu chứng, thời gian, độ tuổi, bệnh nền, và/hoặc câu hỏi cụ thể) không?"
+            msg = "Câu hỏi của bạn có vẻ chưa đủ rõ để xác định mục tiêu. Bạn có thể cung cấp thêm chi tiết (triệu chứng, thời gian, độ tuổi, bệnh nền, và/hoặc câu hỏi cụ thể) không?"
         elif route == "appointment":
             msg = "Chưa triển khai chức năng đặt lịch trong workflow v1 này. Bạn có thể cho mình nội dung câu hỏi y khoa cụ thể để mình hỗ trợ."
         else:
