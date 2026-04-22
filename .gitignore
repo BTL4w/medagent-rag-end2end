@@ -8,3 +8,6 @@ __pycache__/
 .env
 
 *.json
+
+roadmap.md
+notebooks/00_test.ipynb
