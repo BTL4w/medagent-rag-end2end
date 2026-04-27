@@ -12,6 +12,9 @@ numpy
 torch
 sentence-transformers
 python-dotenv
+langgraph
+langgraph-checkpoint-postgres
+psycopg[binary]
 pinecone
 google-api-python-client
 google-auth

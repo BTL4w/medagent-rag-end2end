@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from langchain_core import messages as lc_messages
+
 from src.agents.planner import decompose_to_subqueries
 from src.agents.router import route_query
 from src.agents.synthesizer import synthesize_answer
@@ -25,10 +27,24 @@ def _dedupe_contexts(items: List[Dict[str, Any]], max_items: int) -> List[Dict[s
     return out
 
 
+def _latest_user_query(state: GraphState) -> str:
+    # With checkpointed state, `query` may contain the previous turn.
+    # Always prioritize the latest HumanMessage from current conversation state.
+    for msg in reversed(state.get("messages") or []):
+        if isinstance(msg, lc_messages.HumanMessage):
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            return content.strip()
+    return (state.get("query") or "").strip()
+
+
 def router_node(state: GraphState) -> GraphState:
-    query = (state.get("query") or "").strip()
+    query = _latest_user_query(state)
+    if not query:
+        return {"route": "clarify", "route_reason": "empty_query", "query": ""}
+
     result = route_query(query)
     return {
+        "query": query,
         "route": result["route"],
         "route_reason": str(result.get("reason", "")),
     }
@@ -48,7 +64,11 @@ def orchestrator_entry_node(state: GraphState) -> GraphState:
 
     if route == "chitchat":
         # Let synthesizer handle social intents directly via LLM.
-        return {}
+        return {
+            "contexts": [],
+            "citations": [],
+            "sub_queries": [],
+        }
 
     if route != "simple_qa":
         if route == "clarify":
@@ -58,10 +78,18 @@ def orchestrator_entry_node(state: GraphState) -> GraphState:
             return {
                 "answer": booking_result.get("message", "Đã xử lý yêu cầu đặt lịch."),
                 "appointment_result": booking_result,
+                "contexts": [],
+                "citations": [],
+                "sub_queries": [],
             }
         else:
             msg = "Truy vấn nằm ngoài phạm vi hỗ trợ hiện tại. Nếu bạn có câu hỏi y khoa cụ thể, hãy gửi lại rõ hơn."
-        return {"answer": msg}
+        return {
+            "answer": msg,
+            "contexts": [],
+            "citations": [],
+            "sub_queries": [],
+        }
 
     return {"top_k": top_k}
 
@@ -113,9 +141,16 @@ def retriever_node(state: GraphState) -> GraphState:
 
 def synthesizer_node(state: GraphState) -> GraphState:
     query = (state.get("query") or "").strip()
+    route = state.get("route", "unsupported")
     contexts = state.get("contexts") or []
-    answer = synthesize_answer(query=query, contexts=contexts)
-    return {"answer": answer}
+    if route not in ("simple_qa", "complex_qa"):
+        contexts = []
+    history = state.get("messages") or []
+    answer = synthesize_answer(query=query, contexts=contexts, history=history)
+    return {
+        "answer": answer,
+        "messages": [lc_messages.AIMessage(content=answer)],
+    }
 
 
 def finalize_node(state: GraphState) -> GraphState:

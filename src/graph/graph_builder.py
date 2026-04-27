@@ -1,9 +1,23 @@
 from __future__ import annotations
 
+import os
+import atexit
+from typing import Optional
+
+from dotenv import load_dotenv
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, START, StateGraph
 
 from src.graph.nodes import build_nodes
 from src.graph.state import GraphState
+
+load_dotenv()
+
+_checkpointer: Optional[PostgresSaver] = None
+_memory_url: Optional[str] = None
+_checkpointer_cm = None
+_in_memory_saver: Optional[InMemorySaver] = None
 
 
 def _route_after_orchestrator(state: GraphState) -> str:
@@ -13,6 +27,45 @@ def _route_after_orchestrator(state: GraphState) -> str:
     if route == "chitchat":
         return "synthesizer_node"
     return "finalize_node"
+
+
+def _get_checkpointer():
+    global _checkpointer, _memory_url, _checkpointer_cm, _in_memory_saver
+
+    backend = os.getenv("CHECKPOINTER_BACKEND", "memory").strip().lower()
+    if backend != "postgres":
+        if _in_memory_saver is None:
+            _in_memory_saver = InMemorySaver()
+        return _in_memory_saver
+
+    memory_url = os.getenv("MEMORY_URL")
+    if not memory_url:
+        if _in_memory_saver is None:
+            _in_memory_saver = InMemorySaver()
+        return _in_memory_saver
+
+    if _checkpointer is None or _memory_url != memory_url:
+        if _checkpointer_cm is not None:
+            _checkpointer_cm.__exit__(None, None, None)
+            _checkpointer_cm = None
+
+        try:
+            saver_or_cm = PostgresSaver.from_conn_string(memory_url)
+            if hasattr(saver_or_cm, "__enter__") and hasattr(saver_or_cm, "__exit__"):
+                _checkpointer_cm = saver_or_cm
+                _checkpointer = saver_or_cm.__enter__()
+                atexit.register(lambda: _checkpointer_cm and _checkpointer_cm.__exit__(None, None, None))
+            else:
+                _checkpointer = saver_or_cm
+            _memory_url = memory_url
+            _in_memory_saver = None
+        except Exception:
+            # Keep conversational memory working even if Postgres checkpointer fails.
+            if _in_memory_saver is None:
+                _in_memory_saver = InMemorySaver()
+            return _in_memory_saver
+
+    return _checkpointer
 
 
 def build_graph():
@@ -50,4 +103,5 @@ def build_graph():
     graph.add_edge("synthesizer_node", "finalize_node")
     graph.add_edge("finalize_node", END)
 
-    return graph.compile()
+    checkpointer = _get_checkpointer()
+    return graph.compile(checkpointer=checkpointer)

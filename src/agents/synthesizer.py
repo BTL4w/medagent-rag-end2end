@@ -2,21 +2,34 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
+from langchain_core import messages as lc_messages
 from src.agents.llm import OptionalLLM
 
 
-def _build_chitchat_response_with_llm(query: str, llm: OptionalLLM) -> Optional[str]:
+def _build_chitchat_response_with_llm(
+    query: str,
+    llm: OptionalLLM,
+    history: Optional[List[lc_messages.BaseMessage]] = None,
+) -> Optional[str]:
     if not llm.enabled:
         return None
+
+    history_lines: List[str] = []
+    for msg in history or []:
+        role = "user" if isinstance(msg, lc_messages.HumanMessage) else "assistant"
+        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+        history_lines.append(f"{role}: {content}")
+    history_text = "\n".join(history_lines[-10:])
 
     system_prompt = (
         "Bạn là trợ lý y khoa. "
         "Nhiệm vụ: xử lý hội thoại xã giao và luôn điều hướng về domain chính gồm bệnh lý, thuốc, thông tin sức khỏe.\n"
         "Chỉ xét các nhóm: greeting, identify(bạn là ai), capability(những khả năng của bạn), thanks(lời cảm ơn của user), farewell(lời tạm biệt).\n"
+        "Nếu user hỏi lại thông tin đã nói trong hội thoại (ví dụ tên), được phép dùng lịch sử để trả lời chính xác.\n"
         "Nếu query thuộc một trong 5 nhóm trên: trả lời ngắn gọn 1-2 câu, thân thiện, và kết bằng gợi ý hỏi về bệnh lý/thuốc/sức khỏe.\n"
         "Nếu query không thuộc 5 nhóm trên: chỉ trả về đúng chuỗi __NOT_CHITCHAT__."
     )
-    user_prompt = f"Query: {query}"
+    user_prompt = f"Lịch sử hội thoại gần nhất:\n{history_text}\n\nQuery hiện tại: {query}"
 
     try:
         response = llm.chat(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.0)
@@ -80,14 +93,18 @@ def _build_llm_prompt(query: str, contexts: List[Dict]) -> str:
     )
 
 
-def synthesize_answer(query: str, contexts: List[Dict]) -> str:
+def synthesize_answer(
+    query: str,
+    contexts: List[Dict],
+    history: Optional[List[lc_messages.BaseMessage]] = None,
+) -> str:
     """
     Generate grounded answer from retrieved contexts.
     Uses optional LLM when configured, otherwise falls back to deterministic synthesis.
     """
     llm = OptionalLLM()
     if not contexts:
-        chitchat_response = _build_chitchat_response_with_llm(query=query, llm=llm)
+        chitchat_response = _build_chitchat_response_with_llm(query=query, llm=llm, history=history)
         if chitchat_response:
             return chitchat_response
 

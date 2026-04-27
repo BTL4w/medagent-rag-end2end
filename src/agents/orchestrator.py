@@ -12,6 +12,7 @@ def run_agent(
     *,
     top_k: int = 5,
     retrieval_filter: Optional[Dict[str, Any]] = None,
+    thread_id: str = "default",
 ) -> Dict[str, Any]:
     """
     Run end-to-end workflow for current query.
@@ -27,10 +28,9 @@ def run_agent(
     """
     graph = build_graph()
     state = {
-        "query": query,
         "top_k": top_k,
         "retrieval_filter": retrieval_filter,
         "messages": [messages.HumanMessage(content=query)],
     }
-    result = graph.invoke(state)
+    result = graph.invoke(state, config={"configurable": {"thread_id": thread_id}})
     return result.get("final_response", result)
