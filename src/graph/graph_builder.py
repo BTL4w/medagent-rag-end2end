@@ -5,6 +5,8 @@ import atexit
 from typing import Optional
 
 from dotenv import load_dotenv
+from psycopg import Connection
+from psycopg.rows import dict_row
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, START, StateGraph
@@ -50,13 +52,12 @@ def _get_checkpointer():
             _checkpointer_cm = None
 
         try:
-            saver_or_cm = PostgresSaver.from_conn_string(memory_url)
-            if hasattr(saver_or_cm, "__enter__") and hasattr(saver_or_cm, "__exit__"):
-                _checkpointer_cm = saver_or_cm
-                _checkpointer = saver_or_cm.__enter__()
-                atexit.register(lambda: _checkpointer_cm and _checkpointer_cm.__exit__(None, None, None))
-            else:
-                _checkpointer = saver_or_cm
+            # psycopg DuplicatePreparedStatement can happen when prepared statements
+            # are enabled on pooled/reused connections across runs/processes.
+            # Disable prepared statement threshold for this connection.
+            conn = Connection.connect(memory_url, autocommit=True, prepare_threshold=None, row_factory=dict_row)
+            _checkpointer = PostgresSaver(conn)
+            atexit.register(lambda: conn and not conn.closed and conn.close())
             _memory_url = memory_url
             _in_memory_saver = None
         except Exception:
