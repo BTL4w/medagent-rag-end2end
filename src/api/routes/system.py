@@ -7,6 +7,7 @@ from fastapi import APIRouter
 
 from src.agents.llm import OptionalLLM
 from src.api.schemas import HealthResponse, PublicConfigResponse, ReadinessStatus
+from src.api.store import PostgresStore, store
 
 router = APIRouter(tags=["system"])
 
@@ -36,12 +37,19 @@ def _llm_ready() -> ReadinessStatus:
     return ReadinessStatus(ok=ok, detail=detail)
 
 
+def _api_store_ready() -> ReadinessStatus:
+    is_postgres = isinstance(store, PostgresStore)
+    detail = "postgres" if is_postgres else "in_memory_fallback"
+    return ReadinessStatus(ok=True, detail=detail)
+
+
 @router.get("/health", response_model=HealthResponse)
 def health_check() -> HealthResponse:
     readiness = {
         "vector_db": _vector_ready(),
         "llm": _llm_ready(),
         "calendar_adapter": _calendar_ready(),
+        "api_store": _api_store_ready(),
     }
     status = "ok" if all(item.ok for item in readiness.values()) else "degraded"
     return HealthResponse(
