@@ -14,6 +14,7 @@ from src.api.schemas import (
 from src.api.store import store
 
 router = APIRouter(tags=["appointments"])
+ALLOWED_APPOINTMENT_STATUSES = {"need_more_info", "awaiting_confirmation", "ok", "conflict", "cancelled", "error"}
 
 
 def _session_history_as_lc_messages(session_id: str) -> list[lc_messages.BaseMessage]:
@@ -42,10 +43,13 @@ def submit_appointment(payload: AppointmentSubmitRequest) -> AppointmentResponse
         history=_session_history_as_lc_messages(payload.session_id),
         draft=(latest.draft if latest else {}),
     )
+    status = str(result.get("status") or "need_more_info")
+    if status not in ALLOWED_APPOINTMENT_STATUSES:
+        status = "need_more_info"
     record = store.upsert_appointment(
         request_id=None,
         session_id=payload.session_id,
-        status=str(result.get("status") or "need_more_info"),
+        status=status,
         message=str(result.get("message") or ""),
         draft=result.get("draft"),
         data=result.get("data"),
@@ -91,10 +95,13 @@ def confirm_appointment(request_id: str, payload: AppointmentConfirmRequest) -> 
         history=_session_history_as_lc_messages(record.session_id),
         draft=updated_draft,
     )
+    status = str(result.get("status") or "need_more_info")
+    if status not in ALLOWED_APPOINTMENT_STATUSES:
+        status = "need_more_info"
     next_record = store.upsert_appointment(
         request_id=request_id,
         session_id=record.session_id,
-        status=str(result.get("status") or "need_more_info"),
+        status=status,
         message=str(result.get("message") or ""),
         draft=result.get("draft"),
         data=result.get("data"),

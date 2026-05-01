@@ -19,6 +19,7 @@ from src.api.schemas import (
 from src.api.store import store, utcnow
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+ALLOWED_ROUTES = {"simple_qa", "complex_qa", "appointment", "chitchat", "unsupported", "clarify"}
 
 
 @router.post("/sessions", response_model=SessionCreateResponse)
@@ -79,6 +80,8 @@ def create_message(session_id: str, payload: ChatMessageCreateRequest) -> ChatMe
     )
     answer = str(result.get("answer") or "")
     route = str(result.get("route") or "clarify")
+    if route not in ALLOWED_ROUTES:
+        route = "clarify"
     route_reason = str(result.get("route_reason") or "")
     assistant_msg = store.append_message(
         session_id,

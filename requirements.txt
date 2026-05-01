@@ -21,3 +21,4 @@ google-auth
 tzdata
 uvicorn
 fastapi[standard]
+pytest

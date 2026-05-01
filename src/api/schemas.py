@@ -5,6 +5,9 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+RouteLabel = Literal["simple_qa", "complex_qa", "appointment", "chitchat", "unsupported", "clarify"]
+AppointmentStatus = Literal["need_more_info", "awaiting_confirmation", "ok", "conflict", "cancelled", "error"]
+
 
 class ReadinessStatus(BaseModel):
     ok: bool
@@ -58,7 +61,7 @@ class ChatMessageCreateResponse(BaseModel):
     message_id: str
     session_id: str
     answer: str
-    route: str
+    route: RouteLabel
     route_reason: str = ""
     appointment: AppointmentView
     citations: List[Dict[str, Any]] = Field(default_factory=list)
@@ -91,7 +94,7 @@ class AppointmentConfirmRequest(BaseModel):
 class AppointmentResponse(BaseModel):
     request_id: str
     session_id: str
-    status: str
+    status: AppointmentStatus
     message: str
     draft: Optional[Dict[str, Any]] = None
     data: Optional[Dict[str, Any]] = None
@@ -115,3 +118,14 @@ class PublicConfigResponse(BaseModel):
     locale: str = "vi-VN"
     feature_flags: Dict[str, bool]
     max_message_length: int = 4000
+
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    details: Optional[Dict[str, Any]] = None
+
+
+class ErrorResponse(BaseModel):
+    error: ErrorDetail
+    request_id: str
