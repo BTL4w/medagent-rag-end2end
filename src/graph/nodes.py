@@ -12,6 +12,11 @@ from src.graph.state import GraphState
 from src.retrieval.hybrid_search import hybrid_retrieve
 
 
+def _is_pending_appointment(state: GraphState) -> bool:
+    draft = state.get("appointment_draft") or {}
+    return draft.get("status") == "need_more_info"
+
+
 def _dedupe_contexts(items: List[Dict[str, Any]], max_items: int) -> List[Dict[str, Any]]:
     seen: set[Any] = set()
     out: List[Dict[str, Any]] = []
@@ -41,6 +46,14 @@ def router_node(state: GraphState) -> GraphState:
     query = _latest_user_query(state)
     if not query:
         return {"route": "clarify", "route_reason": "empty_query", "query": ""}
+
+    # Continue multi-turn appointment slot filling until all required fields are collected.
+    if _is_pending_appointment(state):
+        return {
+            "query": query,
+            "route": "appointment",
+            "route_reason": "appointment_continuation",
+        }
 
     result = route_query(query)
     return {
@@ -74,13 +87,20 @@ def orchestrator_entry_node(state: GraphState) -> GraphState:
         if route == "clarify":
             msg = "Câu hỏi của bạn có vẻ chưa đủ rõ để xác định mục tiêu. Bạn có thể cung cấp thêm chi tiết (triệu chứng, thời gian, độ tuổi, bệnh nền, và/hoặc câu hỏi cụ thể) không?"
         elif route == "appointment":
-            booking_result = handle_appointment_request(query=query)
+            booking_result = handle_appointment_request(
+                query=query,
+                history=state.get("messages") or [],
+                draft=state.get("appointment_draft") or {},
+            )
+            answer = booking_result.get("message", "Đã xử lý yêu cầu đặt lịch.")
             return {
-                "answer": booking_result.get("message", "Đã xử lý yêu cầu đặt lịch."),
+                "answer": answer,
                 "appointment_result": booking_result,
+                "appointment_draft": booking_result.get("draft", {}),
                 "contexts": [],
                 "citations": [],
                 "sub_queries": [],
+                "messages": [lc_messages.AIMessage(content=answer)],
             }
         else:
             msg = "Truy vấn nằm ngoài phạm vi hỗ trợ hiện tại. Nếu bạn có câu hỏi y khoa cụ thể, hãy gửi lại rõ hơn."
@@ -89,6 +109,7 @@ def orchestrator_entry_node(state: GraphState) -> GraphState:
             "contexts": [],
             "citations": [],
             "sub_queries": [],
+            "messages": [lc_messages.AIMessage(content=msg)],
         }
 
     return {"top_k": top_k}
@@ -164,6 +185,7 @@ def finalize_node(state: GraphState) -> GraphState:
             "citations": state.get("citations", []),
             "contexts": state.get("contexts", []),
             "appointment_result": state.get("appointment_result"),
+            "appointment_draft": state.get("appointment_draft"),
             "error": state.get("error"),
         }
     }

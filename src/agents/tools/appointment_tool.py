@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from langchain_core import messages as lc_messages
 
 from src.agents.llm import OptionalLLM
 
@@ -72,7 +73,20 @@ def _parse_datetime(date_str: str, time_str: str) -> datetime:
     return dt.replace(tzinfo=VIETNAM_TZ)
 
 
-def _extract_payload_with_llm(query: str) -> Dict[str, Any]:
+def _history_to_text(history: Optional[List[lc_messages.BaseMessage]] = None, keep_last: int = 8) -> str:
+    lines: List[str] = []
+    for msg in (history or [])[-keep_last:]:
+        role = "user" if isinstance(msg, lc_messages.HumanMessage) else "assistant"
+        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+        lines.append(f"{role}: {content}")
+    return "\n".join(lines)
+
+
+def _extract_payload_with_llm(
+    query: str,
+    history: Optional[List[lc_messages.BaseMessage]] = None,
+    draft: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     llm = OptionalLLM()
     if not llm.enabled:
         return {
@@ -105,9 +119,17 @@ def _extract_payload_with_llm(query: str) -> Dict[str, Any]:
         "- intent=check khi hỏi còn lịch trống/rảnh.\n"
         "- intent=delete khi muốn hủy lịch.\n"
         "- intent=book khi muốn đặt lịch.\n"
-        "- Nếu không chắc chắn thì để null hoặc unknown."
+        "- Nếu không chắc chắn thì để null hoặc unknown.\n"
+        "- Có thể suy luận từ hội thoại gần nhất và draft hiện có để điền các trường còn thiếu."
     )
-    raw = llm.chat(system_prompt=system_prompt, user_prompt=f"Query: {query}", temperature=0.0) or "{}"
+    history_text = _history_to_text(history=history)
+    draft_text = json.dumps(draft or {}, ensure_ascii=False)
+    user_prompt = (
+        f"Draft hiện có:\n{draft_text}\n\n"
+        f"Lịch sử hội thoại gần nhất:\n{history_text}\n\n"
+        f"Query hiện tại: {query}"
+    )
+    raw = llm.chat(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.0) or "{}"
     try:
         data = json.loads(raw)
         if isinstance(data, dict):
@@ -117,9 +139,52 @@ def _extract_payload_with_llm(query: str) -> Dict[str, Any]:
     return {}
 
 
-def _payload_from_query(query: str) -> Dict[str, Any]:
-    data = _extract_payload_with_llm(query=query)
-    payload = AppointmentPayload(
+def _payload_from_draft(draft: Optional[Dict[str, Any]]) -> AppointmentPayload:
+    source = draft or {}
+    return AppointmentPayload(
+        full_name=source.get("full_name"),
+        phone=_normalize_phone(source.get("phone")),
+        appointment_date=source.get("appointment_date"),
+        appointment_time=source.get("appointment_time"),
+        reason=source.get("reason"),
+        confirm=source.get("confirm"),
+        event_id=source.get("event_id"),
+    )
+
+
+def _merge_payload(base: AppointmentPayload, incoming: AppointmentPayload) -> AppointmentPayload:
+    return AppointmentPayload(
+        full_name=incoming.full_name or base.full_name,
+        phone=_normalize_phone(incoming.phone) or _normalize_phone(base.phone),
+        appointment_date=incoming.appointment_date or base.appointment_date,
+        appointment_time=incoming.appointment_time or base.appointment_time,
+        reason=incoming.reason or base.reason,
+        confirm=incoming.confirm if incoming.confirm is not None else base.confirm,
+        event_id=incoming.event_id or base.event_id,
+    )
+
+
+def _payload_to_draft(payload: AppointmentPayload, *, status: str, intent: str) -> Dict[str, Any]:
+    return {
+        "intent": intent,
+        "status": status,
+        "full_name": payload.full_name,
+        "phone": payload.phone,
+        "appointment_date": payload.appointment_date,
+        "appointment_time": payload.appointment_time,
+        "reason": payload.reason,
+        "confirm": payload.confirm,
+        "event_id": payload.event_id,
+    }
+
+
+def _payload_from_query(
+    query: str,
+    history: Optional[List[lc_messages.BaseMessage]] = None,
+    draft: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    data = _extract_payload_with_llm(query=query, history=history, draft=draft)
+    incoming_payload = AppointmentPayload(
         full_name=data.get("full_name"),
         phone=_normalize_phone(data.get("phone")),
         appointment_date=data.get("appointment_date"),
@@ -128,9 +193,10 @@ def _payload_from_query(query: str) -> Dict[str, Any]:
         confirm=data.get("confirm"),
         event_id=data.get("event_id"),
     )
+    merged_payload = _merge_payload(_payload_from_draft(draft), incoming_payload)
     return {
         "intent": data.get("intent", "unknown"),
-        "payload": payload,
+        "payload": merged_payload,
     }
 
 
@@ -220,16 +286,24 @@ def _missing_fields(payload: AppointmentPayload) -> List[str]:
     return missing
 
 
-def handle_appointment_request(query: str) -> Dict[str, Any]:
-    extracted = _payload_from_query(query=query)
-    intent = extracted.get("intent", "unknown")
+def handle_appointment_request(
+    query: str,
+    history: Optional[List[lc_messages.BaseMessage]] = None,
+    draft: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    extracted = _payload_from_query(query=query, history=history, draft=draft)
+    intent = str(extracted.get("intent", "unknown") or "unknown").lower()
     payload: AppointmentPayload = extracted["payload"]
+    previous_intent = str((draft or {}).get("intent", "book") or "book").lower()
+    if intent == "unknown" and previous_intent in ("book", "check", "delete"):
+        intent = previous_intent
 
     if intent == "check":
         if not payload.appointment_date or not payload.appointment_time:
             return {
                 "status": "need_more_info",
                 "message": "Để kiểm tra lịch trống, bạn vui lòng cung cấp ngày và giờ mong muốn (ví dụ 2026-04-21, 14:00).",
+                "draft": _payload_to_draft(payload, status="need_more_info", intent="check"),
             }
         try:
             checked = check_apointment_availability(payload.appointment_date, payload.appointment_time)
@@ -241,6 +315,7 @@ def handle_appointment_request(query: str) -> Dict[str, Any]:
                         "Nếu bạn muốn đặt lịch, hãy gửi đầy đủ: Họ tên, SĐT, ngày, giờ, lý do khám/triệu chứng và xác nhận."
                     ),
                     "data": checked,
+                    "draft": _payload_to_draft(payload, status="ok", intent="check"),
                 }
             return {
                 "status": "conflict",
@@ -249,21 +324,36 @@ def handle_appointment_request(query: str) -> Dict[str, Any]:
                     "Bạn vui lòng chọn giờ khác."
                 ),
                 "data": checked,
+                "draft": _payload_to_draft(payload, status="conflict", intent="check"),
             }
         except Exception as exc:
-            return {"status": "error", "message": f"Không thể kiểm tra lịch: {exc}"}
+            return {
+                "status": "error",
+                "message": f"Không thể kiểm tra lịch: {exc}",
+                "draft": _payload_to_draft(payload, status="error", intent="check"),
+            }
 
     if intent == "delete":
         if not payload.event_id:
             return {
                 "status": "need_more_info",
                 "message": "Bạn muốn hủy lịch nào? Vui lòng gửi `event_id` để mình xóa lịch chính xác.",
+                "draft": _payload_to_draft(payload, status="need_more_info", intent="delete"),
             }
         try:
             deleted = delete_apointment(payload.event_id)
-            return {"status": "ok", "message": "Đã hủy lịch thành công.", "data": deleted}
+            return {
+                "status": "ok",
+                "message": "Đã hủy lịch thành công.",
+                "data": deleted,
+                "draft": _payload_to_draft(payload, status="ok", intent="delete"),
+            }
         except Exception as exc:
-            return {"status": "error", "message": f"Không thể hủy lịch: {exc}"}
+            return {
+                "status": "error",
+                "message": f"Không thể hủy lịch: {exc}",
+                "draft": _payload_to_draft(payload, status="error", intent="delete"),
+            }
 
     # Default flow: booking.
     missing = _missing_fields(payload)
@@ -271,6 +361,7 @@ def handle_appointment_request(query: str) -> Dict[str, Any]:
         return {
             "status": "need_more_info",
             "message": "Để đặt lịch, bạn vui lòng cung cấp thêm: " + ", ".join(missing) + ".",
+            "draft": _payload_to_draft(payload, status="need_more_info", intent="book"),
         }
 
     try:
@@ -283,6 +374,7 @@ def handle_appointment_request(query: str) -> Dict[str, Any]:
                     "Bạn chọn giờ khác giúp mình nhé."
                 ),
                 "data": checked,
+                "draft": _payload_to_draft(payload, status="conflict", intent="book"),
             }
 
         created = create_apointment(
@@ -300,6 +392,11 @@ def handle_appointment_request(query: str) -> Dict[str, Any]:
                 f"Thời gian: {payload.appointment_date} {payload.appointment_time}."
             ),
             "data": created,
+            "draft": _payload_to_draft(payload, status="ok", intent="book"),
         }
     except Exception as exc:
-        return {"status": "error", "message": f"Không thể tạo lịch: {exc}"}
+        return {
+            "status": "error",
+            "message": f"Không thể tạo lịch: {exc}",
+            "draft": _payload_to_draft(payload, status="error", intent="book"),
+        }
