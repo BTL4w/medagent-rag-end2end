@@ -69,11 +69,6 @@ def _fallback_answer(query: str, contexts: List[Dict]) -> str:
             text = f"{text[:280]}..."
         lines.append(f"- [{i}] {text}")
 
-    lines.append("")
-    lines.append("Nguồn trích dẫn:")
-    for i, item in enumerate(contexts[:3], start=1):
-        lines.append(f"- [{i}] {_format_citation(item)}")
-
     return "\n".join(lines)
 
 
@@ -89,7 +84,7 @@ def _build_llm_prompt(query: str, contexts: List[Dict]) -> str:
         f"{chr(10).join(context_blocks)}\n\n"
         "Hãy trả lời ngắn gọn, bám sát context, không được bịa. "
         "Nếu không đủ thông tin, nói rõ là chưa đủ bằng chứng. "
-        "Cuối câu trả lời, thêm mục 'Nguồn trích' với citation bao gồm id và source(url) từ context."
+        "Không thêm mục 'Nguồn trích' hoặc bất kỳ danh sách citation/source nào trong câu trả lời."
     )
 
 
