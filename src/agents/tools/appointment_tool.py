@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -64,13 +65,49 @@ def _to_utc_iso(local_dt: datetime) -> str:
 def _normalize_phone(phone: Optional[str]) -> Optional[str]:
     if not phone:
         return None
-    cleaned = "".join(ch for ch in phone if ch.isdigit() or ch == "+")
-    return cleaned or None
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    if not digits:
+        return None
+    if digits.startswith("84"):
+        digits = "0" + digits[2:]
+    return digits
+
+
+def _mask_phone(phone: Optional[str]) -> Optional[str]:
+    if not phone:
+        return None
+    normalized = _normalize_phone(phone)
+    if not normalized:
+        return None
+    if len(normalized) <= 4:
+        return "*" * len(normalized)
+    return f"{normalized[:2]}{'*' * (len(normalized) - 4)}{normalized[-2:]}"
+
+
+def _is_valid_vn_phone(phone: Optional[str]) -> bool:
+    normalized = _normalize_phone(phone)
+    if not normalized:
+        return False
+    return bool(re.fullmatch(r"0\d{9,10}", normalized))
 
 
 def _parse_datetime(date_str: str, time_str: str) -> datetime:
     dt = datetime.fromisoformat(f"{date_str}T{time_str}:00")
     return dt.replace(tzinfo=VIETNAM_TZ)
+
+
+def _validate_future_datetime(date_str: Optional[str], time_str: Optional[str]) -> Optional[str]:
+    if not date_str or not time_str:
+        return None
+    try:
+        target = _parse_datetime(date_str, time_str)
+    except Exception:
+        return "Thời gian đặt lịch chưa đúng định dạng. Vui lòng dùng YYYY-MM-DD cho ngày và HH:MM cho giờ."
+
+    now_local = datetime.now(VIETNAM_TZ)
+    if target <= now_local:
+        return "Thời gian đặt lịch phải ở tương lai. Bạn vui lòng chọn ngày/giờ khác."
+    return None
 
 
 def _history_to_text(history: Optional[List[lc_messages.BaseMessage]] = None, keep_last: int = 8) -> str:
@@ -170,6 +207,7 @@ def _payload_to_draft(payload: AppointmentPayload, *, status: str, intent: str) 
         "status": status,
         "full_name": payload.full_name,
         "phone": payload.phone,
+        "phone_masked": _mask_phone(payload.phone),
         "appointment_date": payload.appointment_date,
         "appointment_time": payload.appointment_time,
         "reason": payload.reason,
@@ -281,8 +319,6 @@ def _missing_fields(payload: AppointmentPayload) -> List[str]:
         missing.append("Giờ đặt lịch (HH:MM)")
     if not payload.reason:
         missing.append("Lý do khám/triệu chứng")
-    if payload.confirm is not True:
-        missing.append("Xác nhận đặt lịch")
     return missing
 
 
@@ -303,6 +339,13 @@ def handle_appointment_request(
             return {
                 "status": "need_more_info",
                 "message": "Để kiểm tra lịch trống, bạn vui lòng cung cấp ngày và giờ mong muốn (ví dụ 2026-04-21, 14:00).",
+                "draft": _payload_to_draft(payload, status="need_more_info", intent="check"),
+            }
+        time_error = _validate_future_datetime(payload.appointment_date, payload.appointment_time)
+        if time_error:
+            return {
+                "status": "need_more_info",
+                "message": time_error,
                 "draft": _payload_to_draft(payload, status="need_more_info", intent="check"),
             }
         try:
@@ -356,12 +399,49 @@ def handle_appointment_request(
             }
 
     # Default flow: booking.
+    if payload.phone and not _is_valid_vn_phone(payload.phone):
+        return {
+            "status": "need_more_info",
+            "message": "SĐT chưa hợp lệ. Vui lòng cung cấp số điện thoại Việt Nam hợp lệ (ví dụ 09xxxxxxxx hoặc +84xxxxxxxxx).",
+            "draft": _payload_to_draft(payload, status="need_more_info", intent="book"),
+        }
+
+    time_error = _validate_future_datetime(payload.appointment_date, payload.appointment_time)
+    if time_error:
+        return {
+            "status": "need_more_info",
+            "message": time_error,
+            "draft": _payload_to_draft(payload, status="need_more_info", intent="book"),
+        }
+
     missing = _missing_fields(payload)
     if missing:
         return {
             "status": "need_more_info",
             "message": "Để đặt lịch, bạn vui lòng cung cấp thêm: " + ", ".join(missing) + ".",
             "draft": _payload_to_draft(payload, status="need_more_info", intent="book"),
+        }
+
+    if payload.confirm is False:
+        return {
+            "status": "cancelled",
+            "message": "Đã hủy yêu cầu đặt lịch theo xác nhận của bạn.",
+            "draft": _payload_to_draft(payload, status="cancelled", intent="book"),
+        }
+
+    if payload.confirm is not True:
+        summary = (
+            "Mình đã thu thập đủ thông tin đặt lịch:\n"
+            f"- Họ tên: {payload.full_name}\n"
+            f"- SĐT: {_mask_phone(payload.phone) or 'N/A'}\n"
+            f"- Thời gian: {payload.appointment_date} {payload.appointment_time}\n"
+            f"- Lý do khám/triệu chứng: {payload.reason}\n\n"
+            "Bạn vui lòng xác nhận lại bằng cách trả lời 'đồng ý đặt lịch' để mình tạo lịch."
+        )
+        return {
+            "status": "awaiting_confirmation",
+            "message": summary,
+            "draft": _payload_to_draft(payload, status="awaiting_confirmation", intent="book"),
         }
 
     try:

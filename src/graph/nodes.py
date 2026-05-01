@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List
 
 from langchain_core import messages as lc_messages
@@ -14,7 +15,50 @@ from src.retrieval.hybrid_search import hybrid_retrieve
 
 def _is_pending_appointment(state: GraphState) -> bool:
     draft = state.get("appointment_draft") or {}
-    return draft.get("status") == "need_more_info"
+    return draft.get("status") in {"need_more_info", "awaiting_confirmation"}
+
+
+def _should_continue_appointment(query: str) -> bool:
+    normalized = (query or "").strip().lower()
+    if not normalized:
+        return True
+
+    appointment_hints = (
+        "đặt lịch",
+        "lịch hẹn",
+        "khám",
+        "hủy lịch",
+        "event_id",
+        "xác nhận",
+        "đồng ý",
+        "ok",
+        "yes",
+        "sđt",
+        "số điện thoại",
+        "họ tên",
+        "ngày",
+        "giờ",
+    )
+    medical_question_hints = (
+        "triệu chứng",
+        "nguyên nhân",
+        "điều trị",
+        "thuốc",
+        "bệnh",
+        "?",
+    )
+
+    has_appointment_hint = any(hint in normalized for hint in appointment_hints)
+    has_slot_like_value = bool(re.search(r"(\+?84|0)\d{8,10}", normalized)) or bool(
+        re.search(r"\d{1,2}[:hg]\d{0,2}|\d{1,2}/\d{1,2}(?:/\d{2,4})?", normalized)
+    )
+    looks_like_medical_question = any(hint in normalized for hint in medical_question_hints)
+
+    if has_appointment_hint or has_slot_like_value:
+        return True
+    if looks_like_medical_question:
+        return False
+    return True
 
 
 def _dedupe_contexts(items: List[Dict[str, Any]], max_items: int) -> List[Dict[str, Any]]:
@@ -30,6 +74,28 @@ def _dedupe_contexts(items: List[Dict[str, Any]], max_items: int) -> List[Dict[s
         if len(out) >= max_items:
             break
     return out
+
+
+def _sanitize_appointment_payload(payload: Dict[str, Any] | None) -> Dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return payload
+    cleaned = dict(payload)
+    draft = cleaned.get("draft")
+    if isinstance(draft, dict):
+        draft_copy = dict(draft)
+        if draft_copy.get("phone"):
+            draft_copy["phone"] = draft_copy.get("phone_masked") or "***"
+        cleaned["draft"] = draft_copy
+    return cleaned
+
+
+def _sanitize_appointment_draft(draft: Dict[str, Any] | None) -> Dict[str, Any] | None:
+    if not isinstance(draft, dict):
+        return draft
+    cleaned = dict(draft)
+    if cleaned.get("phone"):
+        cleaned["phone"] = cleaned.get("phone_masked") or "***"
+    return cleaned
 
 
 def _latest_user_query(state: GraphState) -> str:
@@ -48,7 +114,7 @@ def router_node(state: GraphState) -> GraphState:
         return {"route": "clarify", "route_reason": "empty_query", "query": ""}
 
     # Continue multi-turn appointment slot filling until all required fields are collected.
-    if _is_pending_appointment(state):
+    if _is_pending_appointment(state) and _should_continue_appointment(query):
         return {
             "query": query,
             "route": "appointment",
@@ -184,8 +250,8 @@ def finalize_node(state: GraphState) -> GraphState:
             "answer": state.get("answer"),
             "citations": state.get("citations", []),
             "contexts": state.get("contexts", []),
-            "appointment_result": state.get("appointment_result"),
-            "appointment_draft": state.get("appointment_draft"),
+            "appointment_result": _sanitize_appointment_payload(state.get("appointment_result")),
+            "appointment_draft": _sanitize_appointment_draft(state.get("appointment_draft")),
             "error": state.get("error"),
         }
     }
