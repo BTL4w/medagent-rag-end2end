@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.api.routes.appointment import router as appointment_router
 from src.api.routes.chat import router as chat_router
@@ -12,9 +16,23 @@ from src.api.routes.system import router as system_router
 from src.api.schemas import ErrorResponse
 
 app = FastAPI(title="MedAgent RAG API")
+
+_cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins or ["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(system_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
 app.include_router(appointment_router, prefix="/api/v1")
+
+_STATIC_CHAT_DIR = Path(__file__).resolve().parents[2] / "frontend" / "static-chat"
+if _STATIC_CHAT_DIR.is_dir():
+    app.mount("/chat-ui", StaticFiles(directory=str(_STATIC_CHAT_DIR), html=True), name="chat_ui")
 
 
 @app.middleware("http")
