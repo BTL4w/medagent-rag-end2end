@@ -122,7 +122,7 @@ def create_feedback(payload: FeedbackRequest) -> FeedbackResponse:
     session = store.get_session(payload.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    feedback = store.add_feedback(payload.dict())
+    feedback = store.add_feedback(payload.model_dump())
     return FeedbackResponse(
         feedback_id=feedback["feedback_id"],
         accepted=True,
