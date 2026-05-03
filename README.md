@@ -36,6 +36,28 @@ A **medical assistant** stack combining **hybrid RAG** (dense retrieval + BM25 o
    - `POST /api/v1/chat/sessions` — create a session.
    - `POST /api/v1/chat/sessions/{session_id}/messages` — send a medical question or booking intent.
 
+### Flow diagrams (`assets/`)
+
+High-level paths for readers and slide decks; diagrams are stored under **`assets/`**.
+
+**Simple / complex QA** — `router` → planner only for `complex_qa` → hybrid retrieval → synthesizer → final answer.
+
+![Simple and complex QA routing](assets/00_simple_complex_route.png)
+
+**Appointment** — `router` → appointment handler (slot-filling / calendar) → finalize.
+
+![Appointment routing](assets/01_appointment_route.png)
+
+**Chitchat** — `router` → `orchestrator_entry_node` (no planner; empty `contexts` / `citations`) → `synthesizer_node` **skips** `retriever_node` → LLM reply without RAG → `finalize_node`.
+
+![Chitchat routing](assets/03_chitchat_route.png)
+
+**Clarify / unsupported** — direct reply in orchestrator; no retriever or synthesizer on these routes.
+
+![Clarify and unsupported](assets/02_clarify_unsupported.png)
+
+### Demo video
+
 [![Demo Video](https://img.youtube.com/vi/WNAyGzHLqOE/0.jpg)](https://youtu.be/WNAyGzHLqOE)
 
 ---
@@ -145,6 +167,7 @@ Other flags: `--chunk-size`, `--chunk-overlap`, `--batch-size`, `--cloud`, `--re
 
 ```
 medagent-rag-end2end/
+├── assets/                     # README demo flow diagrams (PNG)
 ├── deploy/
 │   ├── RUNBOOK.md              # Operations: Docker, pytest, smoke tests
 │   └── docker/
