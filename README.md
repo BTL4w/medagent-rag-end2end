@@ -36,8 +36,7 @@ A **medical assistant** stack combining **hybrid RAG** (dense retrieval + BM25 o
    - `POST /api/v1/chat/sessions` — create a session.
    - `POST /api/v1/chat/sessions/{session_id}/messages` — send a medical question or booking intent.
 
-[![Demo Video](https://img.youtube.com/vi/WNAyGzHLqOE/0.jpg)]
-(https://youtu.be/WNAyGzHLqOE)
+[![Demo Video](https://img.youtube.com/vi/WNAyGzHLqOE/0.jpg)](https://youtu.be/WNAyGzHLqOE)
 
 ---
 
